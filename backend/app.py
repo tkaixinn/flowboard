@@ -15,11 +15,12 @@ import requests
 from sqlalchemy import func
 from models import Task, Session, User
 
-load_dotenv()
+ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(ENV_PATH, override=True)
 
 app = Flask(__name__)
 
-app.config["JWT_SECRET_KEY"] = "super-secret-key"
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
 jwt = JWTManager(app)
 
 CORS(app)

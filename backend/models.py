@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from sqlalchemy import Column, Integer, String, Boolean, Date, text
 from sqlalchemy.orm import declarative_base
@@ -7,8 +8,32 @@ from sqlalchemy import create_engine
 from sqlalchemy import ForeignKey
 from werkzeug.security import generate_password_hash, check_password_hash
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(ENV_PATH, override=True)
+
+
+def resolve_database_url():
+    raw_url = (os.getenv("DATABASE_URL") or "").strip()
+    raw_password = os.getenv("DATABASE_PASSWORD")
+
+    if not raw_url:
+        raise RuntimeError("DATABASE_URL is missing. Set it in backend/.env.")
+
+    placeholders = ["[YOUR-PASSWORD]", "[DATABASE_PASSWORD]", "<PASSWORD>", "{PASSWORD}"]
+    if any(token in raw_url for token in placeholders):
+        if not raw_password:
+            raise RuntimeError(
+                "DATABASE_PASSWORD is required when DATABASE_URL contains a password placeholder."
+            )
+
+        encoded_password = quote_plus(raw_password)
+        for token in placeholders:
+            raw_url = raw_url.replace(token, encoded_password)
+
+    return raw_url
+
+
+DATABASE_URL = resolve_database_url()
 
 Base = declarative_base()
 
