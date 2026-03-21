@@ -1,3 +1,4 @@
+from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import (
@@ -19,32 +20,55 @@ session = Session()
 @app.route("/tasks", methods=["GET"])
 @jwt_required()
 def get_tasks():
-
-    current_user_id = int(get_jwt_identity())
-
     session = Session()
+    user_id = int(get_jwt_identity())
 
-    tasks = session.query(Task).filter_by(user_id=current_user_id).all()
+    tasks = session.query(Task).filter_by(user_id=user_id).all()
+    payload = [
+        {
+            "id": t.id,
+            "title": t.title,
+            "completed": t.completed,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+        }
+        for t in tasks
+    ]
 
     session.close()
-    return jsonify([
-        {"id": t.id, "title": t.title, "completed": t.completed}
-        for t in tasks
-    ])
+    return jsonify(payload)
+
+@app.route("/stats", methods=["GET"])
+@jwt_required()
+def stats():
+    session = Session()
+    user_id = int(get_jwt_identity())
+
+    total = session.query(Task).filter_by(user_id=user_id).count()
+    completed = session.query(Task).filter_by(user_id=user_id, completed=True).count()
+
+    session.close()
+
+    return jsonify({
+        "total": total,
+        "completed": completed,
+        "completion_rate": completed / total if total else 0
+    })
     
 
 @app.route("/tasks", methods=["POST"])
 @jwt_required()
 def create_task():
     session = Session()
-    user_id = get_jwt_identity()
-
+    user_id = int(get_jwt_identity())
     data = request.json
+
+    due_date = data.get("due_date")
 
     task = Task(
         title=data["title"],
         completed=False,
-        user_id=user_id   
+        due_date=datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None,
+        user_id=user_id
     )
 
     session.add(task)
@@ -57,39 +81,40 @@ def create_task():
 @jwt_required()
 def update_task(id):
     session = Session()
-    current_user_id = int(get_jwt_identity())
+    user_id = int(get_jwt_identity())
+    task = session.query(Task).filter_by(id=id, user_id=user_id).first()
 
-    # Make sure user owns the task
-    task = session.query(Task).filter_by(id=id, user_id=current_user_id).first()
-    if task:
-        data = request.json
-        task.completed = data.get("completed", task.completed)
-        task.title = data.get("title", task.title)
-        session.commit()
+    if not task:
         session.close()
-        return jsonify({"message": "Task updated"})
-    
+        return jsonify({"message": "Task not found"}), 404
+
+    data = request.json
+    task.title = data.get("title", task.title)
+    task.completed = data.get("completed", task.completed)
+    if "due_date" in data:
+        task.due_date = datetime.strptime(data["due_date"], "%Y-%m-%d").date() if data["due_date"] else None
+
+    session.commit()
     session.close()
-    return jsonify({"message": "Task not found"}), 404
+    return jsonify({"message": "Task updated"})
 
 
 @app.route("/tasks/<int:id>", methods=["DELETE"])
 @jwt_required()
 def delete_task(id):
     session = Session()
-    current_user_id = int(get_jwt_identity())
+    user_id = int(get_jwt_identity())
+    task = session.query(Task).filter_by(id=id, user_id=user_id).first()
 
-    # Make sure user owns the task
-    task = session.query(Task).filter_by(id=id, user_id=current_user_id).first()
-    if task:
-        session.delete(task)
-        session.commit()
+    if not task:
         session.close()
-        return jsonify({"message": "Task deleted"})
-    
-    session.close()
-    return jsonify({"message": "Task not found"}), 404
+        return jsonify({"message": "Task not found"}), 404
 
+    session.delete(task)
+    session.commit()
+    session.close()
+    return jsonify({"message": "Task deleted"})
+    
 @app.route("/")
 def index():
     return jsonify({"message": "Backend is running! Go to /tasks to see the API."}), 200

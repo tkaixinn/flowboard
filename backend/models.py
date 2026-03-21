@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, Date, text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
@@ -12,6 +12,7 @@ class Task(Base):
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=False)
     completed = Column(Boolean, default=False)
+    due_date = Column(Date, nullable=True)
 
     user_id = Column(Integer, ForeignKey('users.id'))
 
@@ -38,4 +39,7 @@ DATABASE_URL = f'postgresql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 
 engine = create_engine(DATABASE_URL, echo=True)
 Base.metadata.create_all(engine)
+with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_date DATE"))
+
 Session = sessionmaker(bind=engine)
