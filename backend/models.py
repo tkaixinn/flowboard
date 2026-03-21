@@ -13,7 +13,7 @@ class Task(Base):
     title = Column(String, nullable=False)
     completed = Column(Boolean, default=False)
     due_date = Column(Date, nullable=True)
-
+    category = Column(String, default="General")
     user_id = Column(Integer, ForeignKey('users.id'))
 
 class User(Base):
@@ -41,5 +41,6 @@ engine = create_engine(DATABASE_URL, echo=True)
 Base.metadata.create_all(engine)
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_date DATE"))
+    conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS category VARCHAR(255) DEFAULT 'General'"))
 
 Session = sessionmaker(bind=engine)

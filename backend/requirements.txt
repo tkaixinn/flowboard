@@ -3,3 +3,5 @@ sqlalchemy
 flask-cors
 psycopg2-binary
 flask-jwt-extended
+requests
+python-dotenv

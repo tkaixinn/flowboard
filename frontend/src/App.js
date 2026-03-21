@@ -15,16 +15,51 @@ function App() {
   const [password, setPassword] = useState("");
   const [stats, setStats] = useState(null);
   const [category, setCategory] = useState("General");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [categories, setCategories] = useState([]);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editCategory, setEditCategory] = useState("");
+  const [aiOpen, setAiOpen] = useState(true);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiPreview, setAiPreview] = useState(null);
+  const [aiMessages, setAiMessages] = useState([
+    {
+      role: "assistant",
+      content: "Ask me about due tasks, overdue work, productivity focus or anything at all!"
+    }
+  ]);
 
-  const fetchTasks = async (authToken) => {
+  const fetchCategories = async (authToken, currentFilter) => {
+    const res = await axios.get(`${API_BASE_URL}/categories`, {
+      headers: { Authorization: `Bearer ${authToken}` }
+    });
+    const nextCategories = res.data;
+    setCategories(nextCategories);
+
+    if (currentFilter !== "All" && !nextCategories.includes(currentFilter)) {
+      return "All";
+    }
+
+    return currentFilter;
+  };
+
+  const fetchTasks = async (authToken, selectedFilter = categoryFilter) => {
     try {
+      const activeFilter = selectedFilter || "All";
+      const resolvedFilter = await fetchCategories(authToken, activeFilter);
+
+      if (resolvedFilter !== categoryFilter) {
+        setCategoryFilter(resolvedFilter);
+      }
+
       const res = await axios.get(`${API_BASE_URL}/tasks`, {
-        headers: { Authorization: `Bearer ${authToken}` }
+        headers: { Authorization: `Bearer ${authToken}` },
+        params: resolvedFilter !== "All" ? { category: resolvedFilter } : {}
       });
       setTasks(res.data);
+
       const statsRes = await axios.get(`${API_BASE_URL}/stats`, {
         headers: { Authorization: `Bearer ${authToken}` }
       });
@@ -67,7 +102,7 @@ function App() {
       setEditingTaskId(null);
       setEditTitle("");
       setEditCategory("");
-      fetchTasks(token);
+      fetchTasks(token, categoryFilter);
     } catch (err) {
       setError("Failed to update task.");
     }
@@ -123,6 +158,8 @@ function App() {
   const handleLogout = () => {
     setToken(null);
     setTasks([]);
+    setCategories([]);
+    setCategoryFilter("All");
     setStats(null);
     localStorage.removeItem("token");
     setIsAuthPage(true);
@@ -141,7 +178,7 @@ function App() {
       setNewTask("");
       setDueDate("");
       setCategory("General");
-      fetchTasks(token);
+      fetchTasks(token, categoryFilter);
     } catch (err) {
       setError("Failed to add task.");
     }
@@ -153,7 +190,7 @@ function App() {
         { completed: !task.completed },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      fetchTasks(token);
+      fetchTasks(token, categoryFilter);
     } catch (err) {
       setError("Failed to update task. Check backend connection.");
     }
@@ -164,9 +201,79 @@ function App() {
       await axios.delete(`${API_BASE_URL}/tasks/${task.id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      fetchTasks(token);
+      fetchTasks(token, categoryFilter);
     } catch (err) {
       setError("Failed to delete task. Check backend connection.");
+    }
+  };
+
+  const handleCategoryFilterChange = (value) => {
+    setCategoryFilter(value);
+    if (token) {
+      fetchTasks(token, value);
+    }
+  };
+
+  const handleAskAI = async () => {
+    const trimmed = aiInput.trim();
+    if (!trimmed || !token) return;
+
+    const userMessage = { role: "user", content: trimmed };
+    setAiMessages((prev) => [...prev, userMessage]);
+    setAiInput("");
+    setAiLoading(true);
+    setAiPreview(null);
+
+    try {
+      const res = await axios.post(
+        `${API_BASE_URL}/ai-assistant`,
+        { query: trimmed },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const answer = res.data?.answer || "No response from AI assistant.";
+      setAiMessages((prev) => [...prev, { role: "assistant", content: answer }]);
+      if (res.data?.action === "preview_create_task" && res.data?.preview) {
+        setAiPreview(res.data.preview);
+      }
+    } catch (err) {
+      setAiMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: err.response?.data?.msg || "AI assistant request failed."
+        }
+      ]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const createTaskFromPreview = async () => {
+    if (!aiPreview || !token) return;
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/tasks`,
+        {
+          title: aiPreview.title,
+          due_date: aiPreview.due_date || null,
+          category: aiPreview.category || "General"
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      setAiMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Task created from AI preview." }
+      ]);
+      setAiPreview(null);
+      fetchTasks(token, categoryFilter);
+    } catch (err) {
+      setAiMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Could not create task from preview." }
+      ]);
     }
   };
 
@@ -219,139 +326,202 @@ function App() {
 
   return (
     <main className="page page-dashboard">
-      <section className="card dashboard-card">
-        <header className="dashboard-header">
-          <div>
-            <h1 className="page-title">Personal Dashboard</h1>
-            <p className="page-subtitle">Track your tasks, categories, and due dates.</p>
-          </div>
-          <button onClick={handleLogout} className="btn btn-danger">
-            Logout
-          </button>
-        </header>
+      <div className="dashboard-layout">
+        <section className="card dashboard-card">
+          <header className="dashboard-header">
+            <div>
+              <h1 className="page-title">Personal Dashboard</h1>
+              <p className="page-subtitle">Track your tasks, categories, due dates, and AI insights.</p>
+            </div>
+            <div className="header-actions">
+              <button onClick={() => setAiOpen((prev) => !prev)} className="btn btn-secondary">
+                {aiOpen ? "Hide AI" : "Show AI"}
+              </button>
+              <button onClick={handleLogout} className="btn btn-danger">
+                Logout
+              </button>
+            </div>
+          </header>
 
-        {error && <p className="error-banner">{error}</p>}
+          {error && <p className="error-banner">{error}</p>}
 
-        <section className="composer">
-          <input
-            value={newTask}
-            onChange={(e) => setNewTask(e.target.value)}
-            className="field-input"
-            placeholder="Task name"
-          />
-          <div className="composer-row">
+          <section className="composer">
             <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              value={newTask}
+              onChange={(e) => setNewTask(e.target.value)}
               className="field-input"
+              placeholder="Task name"
             />
-            <input
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="Category"
+            <div className="composer-row">
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="field-input"
+              />
+              <input
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="Category"
+                className="field-input"
+              />
+              <button onClick={addTask} className="btn btn-primary composer-add">
+                Add Task
+              </button>
+            </div>
+          </section>
+
+          <section className="filter-row">
+            <label className="field-label" htmlFor="category-filter">Filter by category</label>
+            <select
+              id="category-filter"
               className="field-input"
-            />
-            <button onClick={addTask} className="btn btn-primary composer-add">
-              Add Task
-            </button>
-          </div>
+              value={categoryFilter}
+              onChange={(e) => handleCategoryFilterChange(e.target.value)}
+            >
+              <option value="All">All categories</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </section>
+
+          {stats && (
+            <section className="stats-grid">
+              <article className="stat-tile">
+                <span className="stat-label">Total</span>
+                <strong className="stat-value">{stats.total}</strong>
+              </article>
+              <article className="stat-tile">
+                <span className="stat-label">Completed</span>
+                <strong className="stat-value">{stats.completed}</strong>
+              </article>
+              <article className="stat-tile">
+                <span className="stat-label">Completion</span>
+                <strong className="stat-value">{(stats.completion_rate * 100).toFixed(0)}%</strong>
+              </article>
+            </section>
+          )}
+
+          <ul className="task-list">
+            {tasks.map((task) => {
+              const isOverdue =
+                task.due_date &&
+                new Date(task.due_date) < new Date() &&
+                !task.completed;
+
+              return (
+                <li key={task.id} className="task-item">
+                  <div className="task-main">
+                    <input
+                      type="checkbox"
+                      checked={task.completed}
+                      onChange={() => toggleComplete(task)}
+                      className="task-check"
+                    />
+
+                    <div className="task-content">
+                      {editingTaskId === task.id ? (
+                        <div className="edit-fields">
+                          <input
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            className="field-input"
+                          />
+                          <input
+                            value={editCategory}
+                            onChange={(e) => setEditCategory(e.target.value)}
+                            placeholder="Category"
+                            className="field-input"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <h3
+                            className={`task-title ${task.completed ? "task-title-done" : ""} ${isOverdue ? "task-title-overdue" : ""}`}
+                          >
+                            {task.title}
+                          </h3>
+                          <div className="task-meta">
+                            <span className="category-chip">{task.category || "General"}</span>
+                            {task.due_date && (
+                              <span className={`due-text ${isOverdue ? "due-overdue" : ""}`}>
+                                Due {task.due_date}{isOverdue ? " - Overdue" : ""}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="task-actions">
+                    {editingTaskId === task.id ? (
+                      <>
+                        <button onClick={() => saveTaskEdit(task)} className="btn btn-success btn-small">
+                          Save
+                        </button>
+                        <button onClick={cancelTaskEdit} className="btn btn-muted btn-small">
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => startEditingTask(task)} className="btn btn-warning btn-small">
+                        Edit
+                      </button>
+                    )}
+
+                    <button onClick={() => deleteTask(task)} className="btn btn-danger-soft btn-small">
+                      Delete
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </section>
 
-        {stats && (
-          <section className="stats-grid">
-            <article className="stat-tile">
-              <span className="stat-label">Total</span>
-              <strong className="stat-value">{stats.total}</strong>
-            </article>
-            <article className="stat-tile">
-              <span className="stat-label">Completed</span>
-              <strong className="stat-value">{stats.completed}</strong>
-            </article>
-            <article className="stat-tile">
-              <span className="stat-label">Completion</span>
-              <strong className="stat-value">{(stats.completion_rate * 100).toFixed(0)}%</strong>
-            </article>
+        <aside className={`card ai-panel ${aiOpen ? "" : "ai-panel-collapsed"}`}>
+          <header className="ai-header">
+            <h2 className="ai-title">Flowboard AI</h2>
+            <span className="ai-subtitle">Insights, suggestions, and next steps</span>
+          </header>
+
+          <section className="ai-messages">
+            {aiMessages.map((msg, idx) => (
+              <article key={`${msg.role}-${idx}`} className={`ai-bubble ai-${msg.role}`}>
+                {msg.content}
+              </article>
+            ))}
           </section>
-        )}
 
-        <ul className="task-list">
-          {tasks.map((task) => {
-            const isOverdue =
-              task.due_date &&
-              new Date(task.due_date) < new Date() &&
-              !task.completed;
+          {aiPreview && (
+            <section className="ai-preview">
+              <p className="ai-preview-title">Task Preview</p>
+              <p><strong>Title:</strong> {aiPreview.title}</p>
+              <p><strong>Due:</strong> {aiPreview.due_date || "None"}</p>
+              <p><strong>Category:</strong> {aiPreview.category || "General"}</p>
+              <button onClick={createTaskFromPreview} className="btn btn-primary btn-full">
+                Create Task
+              </button>
+            </section>
+          )}
 
-            return (
-              <li key={task.id} className="task-item">
-                <div className="task-main">
-                  <input
-                    type="checkbox"
-                    checked={task.completed}
-                    onChange={() => toggleComplete(task)}
-                    className="task-check"
-                  />
-
-                  <div className="task-content">
-                    {editingTaskId === task.id ? (
-                      <div className="edit-fields">
-                        <input
-                          value={editTitle}
-                          onChange={(e) => setEditTitle(e.target.value)}
-                          className="field-input"
-                        />
-                        <input
-                          value={editCategory}
-                          onChange={(e) => setEditCategory(e.target.value)}
-                          placeholder="Category"
-                          className="field-input"
-                        />
-                      </div>
-                    ) : (
-                      <>
-                        <h3
-                          className={`task-title ${task.completed ? "task-title-done" : ""} ${isOverdue ? "task-title-overdue" : ""}`}
-                        >
-                          {task.title}
-                        </h3>
-                        <div className="task-meta">
-                          <span className="category-chip">{task.category || "General"}</span>
-                          {task.due_date && (
-                            <span className={`due-text ${isOverdue ? "due-overdue" : ""}`}>
-                              Due {task.due_date}{isOverdue ? " - Overdue" : ""}
-                            </span>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="task-actions">
-                  {editingTaskId === task.id ? (
-                    <>
-                      <button onClick={() => saveTaskEdit(task)} className="btn btn-success btn-small">
-                        Save
-                      </button>
-                      <button onClick={cancelTaskEdit} className="btn btn-muted btn-small">
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={() => startEditingTask(task)} className="btn btn-warning btn-small">
-                      Edit
-                    </button>
-                  )}
-
-                  <button onClick={() => deleteTask(task)} className="btn btn-danger-soft btn-small">
-                    Delete
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
+          <section className="ai-composer">
+            <textarea
+              value={aiInput}
+              onChange={(e) => setAiInput(e.target.value)}
+              placeholder="Ask: What is due this week?"
+              className="field-input ai-textarea"
+            />
+            <button onClick={handleAskAI} className="btn btn-secondary btn-full" disabled={aiLoading}>
+              {aiLoading ? "Thinking..." : "Ask AI"}
+            </button>
+          </section>
+        </aside>
+      </div>
     </main>
   );
 }
