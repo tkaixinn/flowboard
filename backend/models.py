@@ -2,6 +2,8 @@ from sqlalchemy import Column, Integer, String, Boolean
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
+from sqlalchemy import ForeignKey
+from werkzeug.security import generate_password_hash, check_password_hash
 
 Base = declarative_base()
 
@@ -11,7 +13,21 @@ class Task(Base):
     title = Column(String, nullable=False)
     completed = Column(Boolean, default=False)
 
+    user_id = Column(Integer, ForeignKey('users.id'))
 
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+    
 DB_USER = 'kaixin'
 DB_PASSWORD = ''
 DB_HOST = 'localhost'
@@ -23,7 +39,3 @@ DATABASE_URL = f'postgresql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 engine = create_engine(DATABASE_URL, echo=True)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
-
-print("Creating tables...")
-Base.metadata.create_all(engine)
-print("Done.")
