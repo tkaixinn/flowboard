@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
@@ -31,7 +31,7 @@ function App() {
     }
   ]);
 
-  const fetchCategories = async (authToken, currentFilter) => {
+  const fetchCategories = useCallback(async (authToken, currentFilter) => {
     const res = await axios.get(`${API_BASE_URL}/categories`, {
       headers: { Authorization: `Bearer ${authToken}` }
     });
@@ -43,9 +43,9 @@ function App() {
     }
 
     return currentFilter;
-  };
+  }, []);
 
-  const fetchTasks = async (authToken, selectedFilter = categoryFilter) => {
+  const fetchTasks = useCallback(async (authToken, selectedFilter = categoryFilter) => {
     try {
       const activeFilter = selectedFilter || "All";
       const resolvedFilter = await fetchCategories(authToken, activeFilter);
@@ -80,7 +80,7 @@ function App() {
       }
       setError(err.response?.data?.msg || "Failed to fetch tasks.");
     }
-  };
+  }, [categoryFilter, fetchCategories]);
 
   const startEditingTask = (task) => {
     setEditingTaskId(task.id);
@@ -281,7 +281,7 @@ function App() {
     if (token) {
       fetchTasks(token);
     }
-  }, [token]);
+  }, [fetchTasks, token]);
 
   if (isAuthPage) {
     return (
