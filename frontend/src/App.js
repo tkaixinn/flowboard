@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import "./App.css";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5001";
 
@@ -13,6 +14,10 @@ function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [stats, setStats] = useState(null);
+  const [category, setCategory] = useState("General");
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editCategory, setEditCategory] = useState("");
 
   const fetchTasks = async (authToken) => {
     try {
@@ -26,8 +31,52 @@ function App() {
       setStats(statsRes.data);
       setError("");
     } catch (err) {
-      setError("Cannot reach backend API. Make sure backend is running on port 5001.");
+      const status = err.response?.status;
+      if (status === 401 || status === 422) {
+        localStorage.removeItem("token");
+        setToken(null);
+        setIsAuthPage(true);
+        setError("Session expired or invalid token. Please log in again.");
+        return;
+      }
+      if (!err.response) {
+        setError("Cannot reach backend API. Make sure backend is running on port 5001.");
+        return;
+      }
+      setError(err.response?.data?.msg || "Failed to fetch tasks.");
     }
+  };
+
+  const startEditingTask = (task) => {
+    setEditingTaskId(task.id);
+    setEditTitle(task.title);
+    setEditCategory(task.category || "General");
+  };
+
+  const saveTaskEdit = async (task) => {
+    if (!editTitle.trim()) {
+      setError("Task title cannot be empty.");
+      return;
+    }
+    try {
+      await axios.put(
+        `${API_BASE_URL}/tasks/${task.id}`,
+        { title: editTitle, category: editCategory || "General" },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setEditingTaskId(null);
+      setEditTitle("");
+      setEditCategory("");
+      fetchTasks(token);
+    } catch (err) {
+      setError("Failed to update task.");
+    }
+  };
+
+  const cancelTaskEdit = () => {
+    setEditingTaskId(null);
+    setEditTitle("");
+    setEditCategory("");
   };
 
   const handleRegister = async () => {
@@ -74,6 +123,7 @@ function App() {
   const handleLogout = () => {
     setToken(null);
     setTasks([]);
+    setStats(null);
     localStorage.removeItem("token");
     setIsAuthPage(true);
     setUsername("");
@@ -85,11 +135,12 @@ function App() {
     try {
       await axios.post(
         `${API_BASE_URL}/tasks`,
-        { title: newTask, due_date: dueDate || null },
+        { title: newTask, category, due_date: dueDate || null },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setNewTask("");
       setDueDate("");
+      setCategory("General");
       fetchTasks(token);
     } catch (err) {
       setError("Failed to add task.");
@@ -123,121 +174,185 @@ function App() {
     if (token) {
       fetchTasks(token);
     }
-  }, []);
+  }, [token]);
 
   if (isAuthPage) {
     return (
-      <div className="p-10 max-w-md mx-auto">
-        <h1 className="text-2xl font-bold mb-4">Login / Register</h1>
-        {error && <p style={{ color: "#b91c1c", marginBottom: "12px" }}>{error}</p>}
-        <input
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="Username"
-          className="border p-2 w-full mb-2"
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-          className="border p-2 w-full mb-4"
-        />
-        <button onClick={handleLogin} className="bg-blue-500 text-white p-2 w-full mb-2">
-          Login
-        </button>
-        <button onClick={handleRegister} className="bg-green-500 text-white p-2 w-full">
-          Register
-        </button>
-      </div>
+      <main className="page page-auth">
+        <section className="card auth-card">
+          <h1 className="page-title">Flowboard</h1>
+          <p className="page-subtitle">Login or create an account to manage your tasks.</p>
+          {error && <p className="error-banner">{error}</p>}
+
+          <label className="field-label" htmlFor="username">Username</label>
+          <input
+            id="username"
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            className="field-input"
+          />
+
+          <label className="field-label" htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            className="field-input"
+          />
+
+          <div className="auth-actions">
+            <button onClick={handleLogin} className="btn btn-primary btn-full">
+              Login
+            </button>
+            <button onClick={handleRegister} className="btn btn-secondary btn-full">
+              Register
+            </button>
+          </div>
+        </section>
+      </main>
     );
   }
 
   return (
-    <div className="p-10 max-w-md mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Personal Dashboard</h1>
-      <button onClick={handleLogout} className="bg-red-500 text-white p-2 mb-4">
-        Logout
-      </button>
-      {error && <p style={{ color: "#b91c1c", marginBottom: "12px" }}>{error}</p>}
-      <div className="flex mb-4">
-      <div className="flex flex-col flex-1">
-        <input
-          value={newTask}
-          onChange={(e) => setNewTask(e.target.value)}
-          className="border p-2 mb-2"
-          placeholder="New task"
-        />
-        <input
-          type="date"
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
-          className="border p-2"
-        />
-      </div>
-        <button onClick={addTask} className="bg-blue-500 text-white p-2 ml-2">
-          Add
-        </button>
-      </div>
-      {stats && (
-        <div className="mb-4">
-          <p>Total Tasks: {stats.total}</p>
-          <p>Completed: {stats.completed}</p>
-          <p>Completion Rate: {(stats.completion_rate * 100).toFixed(0)}%</p>
-        </div>
-      )}
-      <ul>
-        {tasks.map(task => {
-          const isOverdue =
-            task.due_date &&
-            new Date(task.due_date) < new Date() &&
-            !task.completed;
+    <main className="page page-dashboard">
+      <section className="card dashboard-card">
+        <header className="dashboard-header">
+          <div>
+            <h1 className="page-title">Personal Dashboard</h1>
+            <p className="page-subtitle">Track your tasks, categories, and due dates.</p>
+          </div>
+          <button onClick={handleLogout} className="btn btn-danger">
+            Logout
+          </button>
+        </header>
 
-          return (
-            <li key={task.id} className="flex justify-between items-center mb-2">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={task.completed}
-                  onChange={() => toggleComplete(task)}
-                  className="mr-2"
-                />
+        {error && <p className="error-banner">{error}</p>}
 
-                <div>
-                  <strong
-                    style={{
-                      color: task.completed
-                        ? "gray"
-                        : isOverdue
-                        ? "red"
-                        : "black",
-                      textDecoration: task.completed ? "line-through" : "none"
-                    }}
-                  >
-                    {task.title}
-                  </strong>
+        <section className="composer">
+          <input
+            value={newTask}
+            onChange={(e) => setNewTask(e.target.value)}
+            className="field-input"
+            placeholder="Task name"
+          />
+          <div className="composer-row">
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="field-input"
+            />
+            <input
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Category"
+              className="field-input"
+            />
+            <button onClick={addTask} className="btn btn-primary composer-add">
+              Add Task
+            </button>
+          </div>
+        </section>
 
-                  {task.due_date && (
-                    <small className="block text-gray-500">
-                      Due: {task.due_date}
-                      {isOverdue && !task.completed && " (Overdue)"}
-                    </small>
-                  )}
+        {stats && (
+          <section className="stats-grid">
+            <article className="stat-tile">
+              <span className="stat-label">Total</span>
+              <strong className="stat-value">{stats.total}</strong>
+            </article>
+            <article className="stat-tile">
+              <span className="stat-label">Completed</span>
+              <strong className="stat-value">{stats.completed}</strong>
+            </article>
+            <article className="stat-tile">
+              <span className="stat-label">Completion</span>
+              <strong className="stat-value">{(stats.completion_rate * 100).toFixed(0)}%</strong>
+            </article>
+          </section>
+        )}
+
+        <ul className="task-list">
+          {tasks.map((task) => {
+            const isOverdue =
+              task.due_date &&
+              new Date(task.due_date) < new Date() &&
+              !task.completed;
+
+            return (
+              <li key={task.id} className="task-item">
+                <div className="task-main">
+                  <input
+                    type="checkbox"
+                    checked={task.completed}
+                    onChange={() => toggleComplete(task)}
+                    className="task-check"
+                  />
+
+                  <div className="task-content">
+                    {editingTaskId === task.id ? (
+                      <div className="edit-fields">
+                        <input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="field-input"
+                        />
+                        <input
+                          value={editCategory}
+                          onChange={(e) => setEditCategory(e.target.value)}
+                          placeholder="Category"
+                          className="field-input"
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <h3
+                          className={`task-title ${task.completed ? "task-title-done" : ""} ${isOverdue ? "task-title-overdue" : ""}`}
+                        >
+                          {task.title}
+                        </h3>
+                        <div className="task-meta">
+                          <span className="category-chip">{task.category || "General"}</span>
+                          {task.due_date && (
+                            <span className={`due-text ${isOverdue ? "due-overdue" : ""}`}>
+                              Due {task.due_date}{isOverdue ? " - Overdue" : ""}
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <button
-                onClick={() => deleteTask(task)}
-                className="text-red-500"
-              >
-                Delete
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+                <div className="task-actions">
+                  {editingTaskId === task.id ? (
+                    <>
+                      <button onClick={() => saveTaskEdit(task)} className="btn btn-success btn-small">
+                        Save
+                      </button>
+                      <button onClick={cancelTaskEdit} className="btn btn-muted btn-small">
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => startEditingTask(task)} className="btn btn-warning btn-small">
+                      Edit
+                    </button>
+                  )}
+
+                  <button onClick={() => deleteTask(task)} className="btn btn-danger-soft btn-small">
+                    Delete
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </main>
   );
 }
 
