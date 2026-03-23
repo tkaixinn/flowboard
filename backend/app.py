@@ -24,7 +24,10 @@ app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
 jwt = JWTManager(app)
 
 CORS(app)
-session = Session()
+
+@app.teardown_appcontext
+def shutdown_session(_exception=None):
+    Session.remove()
 
 
 def normalize_category(raw_category):
@@ -99,7 +102,7 @@ def call_groq(messages, temperature=0.3):
                 "messages": messages,
                 "temperature": temperature,
             },
-            timeout=20,
+            timeout=(5, 15),
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
@@ -391,8 +394,10 @@ def login():
 
     if user and user.check_password(data["password"]):
         token = create_access_token(identity=str(user.id))
+        session.close()
         return jsonify({"access_token": token})
 
+    session.close()
     return jsonify({"msg": "Invalid credentials"}), 401
 
 
@@ -400,35 +405,35 @@ def login():
 @jwt_required()
 def ai_assistant():
     session = Session()
-    user_id = int(get_jwt_identity())
-    data = request.json or {}
-    query = (data.get("query") or "").strip()
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.json or {}
+        query = (data.get("query") or "").strip()
 
-    if not query:
+        if not query:
+            return jsonify({"msg": "Query is required"}), 400
+
+        # Load user tasks once, then release DB resources before any slow network call.
+        tasks = session.query(Task).filter_by(user_id=user_id).all()
+    finally:
         session.close()
-        return jsonify({"msg": "Query is required"}), 400
 
-    tasks = session.query(Task).filter_by(user_id=user_id).all()
     lowered = query.lower()
 
     if "due this week" in lowered:
         answer = build_due_this_week_response(tasks)
-        session.close()
         return jsonify({"answer": answer})
 
     if "overdue" in lowered:
         answer = build_overdue_response(tasks)
-        session.close()
         return jsonify({"answer": answer})
 
     if "completed" in lowered and "summary" in lowered:
         answer = build_completed_summary(tasks)
-        session.close()
         return jsonify({"answer": answer})
 
     if looks_like_task_creation(query):
         parsed_task = parse_task_with_groq(query)
-        session.close()
 
         if not parsed_task:
             return jsonify({
@@ -442,7 +447,6 @@ def ai_assistant():
         })
 
     answer = suggest_with_groq(query, tasks)
-    session.close()
     return jsonify({"answer": answer})
 
 if __name__ == "__main__":

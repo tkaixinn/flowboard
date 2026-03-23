@@ -3,7 +3,7 @@ from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from sqlalchemy import Column, Integer, String, Boolean, Date, text
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy import create_engine
 from sqlalchemy import ForeignKey
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -59,10 +59,19 @@ class User(Base):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
-engine = create_engine(DATABASE_URL, echo=True)
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, echo=False)
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        pool_timeout=10,
+    )
 Base.metadata.create_all(engine)
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_date DATE"))
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS category VARCHAR(255) DEFAULT 'General'"))
 
-Session = sessionmaker(bind=engine)
+Session = scoped_session(sessionmaker(bind=engine))
