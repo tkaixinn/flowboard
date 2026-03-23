@@ -46,6 +46,8 @@ It is built with a modern **React frontend** and a **Flask backend**, fully depl
 
 You can try the app live without any setup, sign up, create tasks, and explore the AI-powered suggestions.  
 
+The live demo is fully deployed and functional. Backend API is connected, database integration works, and AI assistant provides real-time suggestions.
+
 ---
 
 ## 🛠 Tech Stack
